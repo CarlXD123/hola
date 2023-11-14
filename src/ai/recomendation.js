@@ -180,6 +180,25 @@ function preprocessOrderHistory(orderHistory) {
 async function getRecommendations(userId) {
   const query = `
   SELECT
+  'promo' AS type,
+  NULL AS id_product,
+  pr.description AS name,
+  pr.description,
+  pr.price,
+  pr.image,
+  NULL AS category,
+  pr.id_promo
+FROM
+  recomendations r
+JOIN
+  promotions pr ON r.id_promo = pr.id_promo
+WHERE
+  r.id_user = ? AND r.id_promo IS NOT NULL
+GROUP BY pr.description
+
+UNION ALL
+
+SELECT
   'product' AS type,
   p.id_product,
   p.name,
@@ -192,28 +211,12 @@ FROM
   recomendations r
 JOIN
   products p ON r.id_product = p.id_product
+LEFT JOIN
+  promotions pr ON p.name = pr.description
 WHERE
-  r.id_user = ? AND r.id_product IS NOT NULL
+  r.id_user = ? AND r.id_product IS NOT NULL AND pr.id_promo IS NULL
 GROUP BY p.id_product
 
-UNION ALL
-
-SELECT
-  'promo' AS type,
-  NULL AS id_product,
-  NULL AS name,
-  pr.description,
-  pr.price,
-  pr.image,
-  NULL AS category,
-  pr.id_promo
-FROM
-  recomendations r
-JOIN
-  promotions pr ON r.id_promo = pr.id_promo
-WHERE
-  r.id_user = ? AND r.id_promo IS NOT NULL
-GROUP BY pr.description -- Agrupando por descripción
   `;
   const values = [userId, userId]; // Se pasa userId dos veces porque la consulta tiene dos partes que lo requieren
   return await fetchData(query, values);
