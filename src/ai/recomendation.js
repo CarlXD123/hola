@@ -190,34 +190,37 @@ function preprocessOrderHistory(orderHistory) {
 async function getRecommendations(userId) {
   // Obtiene el historial de pedidos del usuario.
   const userOrderHistory = await getUserOrderHistory(userId);
-  // Convierte el historial de pedidos en una lista de IDs de productos comprados.
-  const orderedProductIds = userOrderHistory.map((order) => order.id_product);
+  const orderedProductIds = userOrderHistory.map(order => order.id_product);
 
-  // Encuentra promociones basadas en los productos que el usuario ha comprado.
+  // Obtiene todas las promociones.
   const promotions = await fetchData("SELECT * FROM promotions");
-  let recommendedPromotions = promotions.filter((promotion) =>
+  
+  // Encuentra promociones que incluyan los productos comprados por el usuario.
+  let recommendedPromotions = promotions.filter(promotion =>
     orderedProductIds.includes(promotion.id_producto)
   );
 
-  // Si no hay promociones específicas para los productos comprados, usa selectPromotionBasedOnHistory
-  // para encontrar una promoción recomendada basada en otros criterios.
+  // Elimina promociones duplicadas.
+  recommendedPromotions = uniquePromotions(recommendedPromotions);
+
+  // Si no hay promociones específicas, usa una promoción basada en otros criterios.
   if (recommendedPromotions.length === 0) {
     const recommendedPromotionId = await selectPromotionBasedOnHistory(userId);
     if (recommendedPromotionId) {
-      recommendedPromotions = promotions.filter(
-        (promotion) => promotion.id_promo === recommendedPromotionId
+      recommendedPromotions = promotions.filter(promotion => 
+        promotion.id_promo === recommendedPromotionId
       );
     }
   }
 
-  // Si aún no hay promociones recomendadas, devuelve un conjunto vacío de resultados o alguna promoción por defecto.
+  // Devuelve un conjunto vacío o una promoción por defecto si no hay recomendaciones.
   if (recommendedPromotions.length === 0) {
-    return []; // O reemplaza esto con la lógica para una promoción por defecto.
+    return []; // O una promoción por defecto.
   }
 
-  // Construye la consulta para obtener los detalles de las promociones recomendadas.
-  const promoIds = recommendedPromotions.map((promo) => promo.id_promo);
-  const placeholders = promoIds.map(() => "?").join(",");
+  // Prepara y ejecuta la consulta.
+  const promoIds = recommendedPromotions.map(promo => promo.id_promo);
+  const placeholders = promoIds.map(() => '?').join(',');
   const query = `
   SELECT
     'promo' AS type,
@@ -232,9 +235,23 @@ async function getRecommendations(userId) {
   WHERE
     pr.id_promo IN (${placeholders})`;
 
-  // Ejecuta la consulta con los IDs de las promociones recomendadas.
   return await fetchData(query, promoIds);
 }
+
+// Función para eliminar promociones duplicadas.
+function uniquePromotions(promotions) {
+  const unique = new Map();
+  for (const promotion of promotions) {
+    // Aquí, podrías usar cualquier criterio único, como la descripción de la promoción.
+    let uniqueKey = promotion.description; // o promotion.id_producto dependiendo de tu lógica de negocio
+    if (!unique.has(uniqueKey)) {
+      unique.set(uniqueKey, promotion);
+    }
+  }
+  return Array.from(unique.values());
+}
+
+
 
 // Función asíncrona para generar recomendaciones de productos para un usuario específico.
 async function generateRecommendationsForUser(userId) {
