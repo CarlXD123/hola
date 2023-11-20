@@ -142,8 +142,19 @@ async function trainRecommendationModel() {
 }
 
 async function saveRecommendationsForUser(userId, recommendations) {
+  const existingProducts = await fetchData("SELECT id_product FROM products");
+  const existingProductIds = new Set(
+    existingProducts.map((product) => product.id_product)
+  );
+
   for (const productId of recommendations) {
-    // Busca si hay una promoción asociada a este producto, independientemente de la fecha.
+    // Continúa solo si el id_product existe en la tabla de productos
+    if (!existingProductIds.has(productId)) {
+      console.log(
+        `Producto con ID ${productId} no existe en la base de datos y será omitido.`
+      );
+      continue;
+    }
     const promoQuery = "SELECT id_promo FROM promotions WHERE id_producto = ?";
     const promoValues = [productId];
     const promoResult = await fetchData(promoQuery, promoValues);
@@ -176,50 +187,53 @@ function preprocessOrderHistory(orderHistory) {
   return orderHistory.map((order) => order.id_product);
 }
 
-//Una vez entrenado se lista las recomendaciones
 async function getRecommendations(userId) {
+  // Obtiene el historial de pedidos del usuario.
+  const userOrderHistory = await getUserOrderHistory(userId);
+  // Convierte el historial de pedidos en una lista de IDs de productos comprados.
+  const orderedProductIds = userOrderHistory.map((order) => order.id_product);
+
+  // Encuentra promociones basadas en los productos que el usuario ha comprado.
+  const promotions = await fetchData("SELECT * FROM promotions");
+  let recommendedPromotions = promotions.filter((promotion) =>
+    orderedProductIds.includes(promotion.id_producto)
+  );
+
+  // Si no hay promociones específicas para los productos comprados, usa selectPromotionBasedOnHistory
+  // para encontrar una promoción recomendada basada en otros criterios.
+  if (recommendedPromotions.length === 0) {
+    const recommendedPromotionId = await selectPromotionBasedOnHistory(userId);
+    if (recommendedPromotionId) {
+      recommendedPromotions = promotions.filter(
+        (promotion) => promotion.id_promo === recommendedPromotionId
+      );
+    }
+  }
+
+  // Si aún no hay promociones recomendadas, devuelve un conjunto vacío de resultados o alguna promoción por defecto.
+  if (recommendedPromotions.length === 0) {
+    return []; // O reemplaza esto con la lógica para una promoción por defecto.
+  }
+
+  // Construye la consulta para obtener los detalles de las promociones recomendadas.
+  const promoIds = recommendedPromotions.map((promo) => promo.id_promo);
+  const placeholders = promoIds.map(() => "?").join(",");
   const query = `
   SELECT
-  'promo' AS type,
-  NULL AS id_product,
-  pr.description AS name,
-  pr.description,
-  pr.price,
-  pr.image,
-  NULL AS category,
-  pr.id_promo
-FROM
-  recomendations r
-JOIN
-  promotions pr ON r.id_promo = pr.id_promo
-WHERE
-  r.id_user = ? AND r.id_promo IS NOT NULL
-GROUP BY pr.description
+    'promo' AS type,
+    pr.id_promo,
+    pr.description,
+    pr.price,
+    pr.image,
+    NULL AS category,
+    pr.id_promo
+  FROM
+    promotions pr
+  WHERE
+    pr.id_promo IN (${placeholders})`;
 
-UNION ALL
-
-SELECT
-  'product' AS type,
-  p.id_product,
-  p.name,
-  p.description,
-  p.price,
-  p.image,
-  p.category,
-  NULL AS id_promo
-FROM
-  recomendations r
-JOIN
-  products p ON r.id_product = p.id_product
-LEFT JOIN
-  promotions pr ON p.name = pr.description
-WHERE
-  r.id_user = ? AND r.id_product IS NOT NULL AND pr.id_promo IS NULL
-GROUP BY p.id_product
-
-  `;
-  const values = [userId, userId]; // Se pasa userId dos veces porque la consulta tiene dos partes que lo requieren
-  return await fetchData(query, values);
+  // Ejecuta la consulta con los IDs de las promociones recomendadas.
+  return await fetchData(query, promoIds);
 }
 
 // Función asíncrona para generar recomendaciones de productos para un usuario específico.
@@ -261,10 +275,54 @@ async function generateRecommendationsForUser(userId) {
     .sort((a, b) => b.score - a.score)
     .slice(0, N);
 
-  // Devuelve los IDs de los productos mejor recomendados.
-  return topRecommendedProducts.map((product) => product.id_product);
+  // Obtiene el id de la promoción recomendada basada en el historial de compras del usuario.
+  const recommendedPromotionId = await selectPromotionBasedOnHistory(userId);
+
+  // Devuelve los IDs de los productos mejor recomendados junto con la promoción recomendada.
+  const topRecommendedProductIds = topRecommendedProducts.map(
+    (product) => product.id_product
+  );
+  return recommendedPromotionId
+    ? [...topRecommendedProductIds, recommendedPromotionId]
+    : topRecommendedProductIds;
 }
 
+// Función para seleccionar la promoción basada en el historial de compras del usuario.
+async function selectPromotionBasedOnHistory(userId) {
+  // Obtiene el historial de pedidos del usuario.
+  const userOrderHistory = await getUserOrderHistory(userId);
+  // Convierte el historial de pedidos en una lista de IDs de productos comprados.
+  const orderedProductIds = userOrderHistory.map((order) => order.id_product);
+  // Encuentra el ID del producto más comprado por el usuario.
+  const mostFrequentProductId = findMostFrequentProductId(orderedProductIds);
+  // Obtiene todas las promociones.
+  const promotions = await fetchData("SELECT * FROM promotions");
+  // Encuentra la promoción que incluye el producto más comprado.
+  const recommendedPromotion = promotions.find(
+    (promotion) => promotion.id_producto == mostFrequentProductId
+  );
+  // Retorna el id_promo de la promoción recomendada si existe.
+  return recommendedPromotion ? recommendedPromotion.id_promo : null;
+}
+
+// Función para encontrar el producto más frecuente en el historial de pedidos.
+function findMostFrequentProductId(orderedProductIds) {
+  const frequencyMap = orderedProductIds.reduce((acc, productId) => {
+    acc[productId] = (acc[productId] || 0) + 1;
+    return acc;
+  }, {});
+
+  let mostFrequentProductId = null;
+  let maxFrequency = 0;
+  Object.entries(frequencyMap).forEach(([productId, frequency]) => {
+    if (frequency > maxFrequency) {
+      mostFrequentProductId = productId;
+      maxFrequency = frequency;
+    }
+  });
+
+  return mostFrequentProductId;
+}
 
 //Inicia todo el entrenamiento
 async function initRecommendationSystem() {
@@ -289,5 +347,7 @@ export {
   preprocessOrderHistory,
   getRecommendations,
   initRecommendationSystem,
+  generateRecommendationsForUser,
+  selectPromotionBasedOnHistory,
   clearRecommendations,
 };
