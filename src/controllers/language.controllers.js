@@ -94,14 +94,14 @@ const deleteUser = async (req, res) => {
 };
 
 const addUsers = async (req, res) => {
-    const { username, password, email, rol, idrol } = req.body;
+    const { username, password, email, rol, idrol, direccion, telefono } = req.body;
 
-    if (!username || !password || !email || !rol || !idrol) {
+    if (!username || !password || !email || !rol || !idrol || !direccion || !telefono) {
         return res.status(400).json({ message: "Please fill all fields." });
     }
 
     const hashedPassword = await bcrypt.hash(password, saltRounds);
-    const usuario = { username, password: hashedPassword, email, rol, idrol};
+    const usuario = { username, password: hashedPassword, email, rol, idrol, direccion, telefono};
 
     try {
         const connection = await getConnection();
