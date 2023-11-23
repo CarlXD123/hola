@@ -68,7 +68,7 @@ const getAllOrders = async (req, res) => {
     try {
         const connection = await getConnection();
 
-        connection.query("SELECT o.id_order, o.date_order, od.price_unit, o.status, od.id_product, p.name AS product_name, od.count, od.price_unit, od.sub_total FROM orders o JOIN orderdetails od ON o.id_order = od.id_order JOIN products p ON od.id_product = p.id_product", (error, results) => {
+        connection.query("SELECT o.id_order, o.date_order, od.price_unit, o.status, od.id_product, p.name AS product_name, od.count, od.price_unit, od.sub_total, u.username AS customer_name, u.direccion AS customer_address, u.telefono AS customer_phone FROM orders o JOIN orderdetails od ON o.id_order = od.id_order JOIN products p ON od.id_product = p.id_product JOIN users u ON o.id_usuario = u.id_usuario", (error, results) => {
             connection.release();
             if (error) {
                 console.error(error);
@@ -81,6 +81,8 @@ const getAllOrders = async (req, res) => {
         res.status(500).json({ message: "Internal Server Error" });
     }
 };
+
+
 
 const getOrderById = async (req, res) => {
     const { id } = req.params;
